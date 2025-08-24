@@ -1,91 +1,113 @@
-from __future__ import annotations
+import io
 from io import BytesIO
-from typing import List, Optional
+from typing import List
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
 import arabic_reshaper
 from bidi.algorithm import get_display
 
 from models import Inspection, InspectionItem, User
 
-# Try to register a Unicode font (must be present on server)
-# You can upload 'DejaVuSans.ttf' or 'Amiri-Regular.ttf' next to the app for better Arabic rendering.
-def _register_fonts():
-    try:
-        pdfmetrics.registerFont(TTFont("DejaVuSans", "DejaVuSans.ttf"))
-        return "DejaVuSans"
-    except Exception:
-        # Fallback to Helvetica (Arabic won't render properly without a Unicode font)
-        return "Helvetica"
+styles = getSampleStyleSheet()
+styleN = styles["Normal"]
+styleH = styles["Heading2"]
 
-FONT_NAME = _register_fonts()
-
-def _draw_text(c, x, y, text, size=10, rtl=False):
-    c.setFont(FONT_NAME, size)
-    if rtl and FONT_NAME != "Helvetica":
-        reshaped = arabic_reshaper.reshape(text or "")
-        bidi_text = get_display(reshaped)
-        c.drawString(x, y, bidi_text)
-    else:
-        c.drawString(x, y, text or "")
+def _rtl(text: str) -> str:
+    if not text:
+        return ""
+    return get_display(arabic_reshaper.reshape(text))
 
 def generate_inspection_pdf(*, insp: Inspection, items: List[InspectionItem], user: User) -> bytes:
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     width, height = A4
-
     margin = 15 * mm
     y = height - margin
 
-    # Header: logo or title
-    c.setFont(FONT_NAME, 16)
-    header_title = "Inspection Report / تقرير التفتيش"
-    c.drawString(margin, y, header_title)
-    y -= 10 * mm
+    # --- Header: Logo + Hero image ---
+    if insp.logo_image:
+        try:
+            logo_reader = ImageReader(io.BytesIO(insp.logo_image))
+            c.drawImage(logo_reader, margin, y - 20*mm, width=30*mm, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+    if insp.hero_image:
+        try:
+            hero_reader = ImageReader(io.BytesIO(insp.hero_image))
+            c.drawImage(hero_reader, margin + 40*mm, y - 40*mm, width=100*mm, height=40*mm, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
 
-    # Building & Inspector info
-    _draw_text(c, margin, y, f"Building: {insp.building_name}", 11); y -= 6 * mm
-    _draw_text(c, margin, y, f"Address: {insp.building_address or '-'}", 10); y -= 6 * mm
-    _draw_text(c, margin, y, f"Inspector: {insp.inspector.full_name}  (Civil ID: {insp.inspector_civil_id or '-'})", 10); y -= 6 * mm
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin, y, "Inspection Report / تقرير التفتيش")
+    y -= 50*mm
 
-    # Company footer logic handled at end
+    # --- Building info ---
+    c.setFont("Helvetica", 10)
+    c.drawString(margin, y, f"Building: {insp.building_name}")
+    y -= 6*mm
+    if insp.building_address:
+        c.drawString(margin, y, f"Address: {insp.building_address}")
+        y -= 6*mm
+    c.drawString(margin, y, f"Inspector: {user.full_name}")
+    y -= 12*mm
 
-    # Checklist header
-    y -= 4 * mm
-    _draw_text(c, margin, y, "Checklist / قائمة الفحص", 12); y -= 8 * mm
+    # --- Checklist ---
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(margin, y, "Checklist / قائمة الفحص")
+    y -= 8*mm
 
-    # Items
     for idx, it in enumerate(items, start=1):
-        line = f"{idx}. {it.question_en} — [{it.status}]"
-        _draw_text(c, margin, y, line, 10)
-        y -= 5 * mm
+        c.setFont("Helvetica", 10)
+        q = f"{idx}. {it.question_en} — [{it.status}]"
+        c.drawString(margin, y, q)
+        y -= 5*mm
         if it.question_ar:
-            _draw_text(c, margin, y, it.question_ar, 10, rtl=True)
-            y -= 5 * mm
+            c.drawString(margin, y, _rtl(it.question_ar))
+            y -= 5*mm
         if it.observation_text:
-            _draw_text(c, margin + 5 * mm, y, f"Obs: {it.observation_text}", 9)
-            y -= 5 * mm
+            c.drawString(margin+10, y, f"Obs: {it.observation_text}")
+            y -= 5*mm
         if it.code_ref:
-            _draw_text(c, margin + 5 * mm, y, f"Code: {it.code_ref}", 9)
-            y -= 5 * mm
-        # add page if needed
-        if y < 40 * mm:
+            c.drawString(margin+10, y, f"Code: {it.code_ref}")
+            y -= 5*mm
+
+        # --- Checklist photo ---
+        if it.photo:
+            try:
+                photo_reader = ImageReader(io.BytesIO(it.photo))
+                c.drawImage(photo_reader, margin+10, y-40*mm, width=60*mm, height=40*mm, preserveAspectRatio=True, mask='auto')
+                y -= 45*mm
+            except Exception:
+                pass
+
+        # page break check
+        if y < 40*mm:
             c.showPage()
             y = height - margin
-            _draw_text(c, margin, y, "Checklist (cont.) / متابعة قائمة الفحص", 12); y -= 8 * mm
 
-    # Footer
-    c.line(margin, 20 * mm, width - margin, 20 * mm)
-    if user.is_subscribed and (user.company_info or user.company_logo):
-        # White-label footer
-        _draw_text(c, margin, 15 * mm, user.company_info or "", 9)
-        # (Logo rendering could be added by saving logo to temp and drawingImage)
+    # --- Signature ---
+    if insp.signature_image:
+        try:
+            sig_reader = ImageReader(io.BytesIO(insp.signature_image))
+            c.drawString(margin, y-10, "Inspector Signature:")
+            c.drawImage(sig_reader, margin+40*mm, y-20*mm, width=50*mm, height=20*mm, mask='auto')
+            y -= 30*mm
+        except Exception:
+            pass
+
+    # --- Footer ---
+    c.line(margin, 20*mm, width - margin, 20*mm)
+    if user.is_subscribed and user.company_info:
+        c.setFont("Helvetica", 9)
+        c.drawString(margin, 15*mm, user.company_info)
     else:
-        # Free watermark
-        _draw_text(c, margin, 15 * mm, "Powered by The AI Bureau + Safety Lines", 9)
+        c.setFont("Helvetica", 9)
+        c.drawString(margin, 15*mm, "Powered by The AI Bureau + Safety Lines")
 
     c.showPage()
     c.save()
