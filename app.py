@@ -300,27 +300,29 @@ def main():
     handle_confirm_param()
 
     if 'user' not in st.session_state: st.session_state['user'] = None
-    if 'page' not in st.session_state: st.session_state['page'] = 'login'
+    def main():
+    st.set_page_config(page_title=APP_NAME, page_icon="🛡️", layout="wide")
+    init_db()
+    handle_confirm_param()
 
-    if st.session_state['page'] == 'signup':
-        signup_ui(); return
+    # 🚨 TEMPORARY BYPASS: Auto-login as a fake inspector user
+    st.session_state['user'] = {
+        'id': 1,
+        'username': 'demo',
+        'full_name': 'Demo Inspector',
+        'role': 'inspector',
+    }
 
-    if st.session_state['user'] is None:
-        login_ui(); return
-
-    nav = sidebar_nav()
-    if nav == "Logout":
-        st.session_state['user'] = None
-        st.session_state['page'] = 'login'
-        st.rerun()
-    elif nav == "Dashboard":
+    # Go straight to dashboard / inspections
+    choice = sidebar_nav() or "Dashboard"
+    if choice == "Dashboard":
         page_dashboard()
-    elif nav == "New Inspection":
+    elif choice == "New Inspection":
         page_new_inspection()
-    elif nav == "Profile & Branding":
+    elif choice == "Profile & Branding":
         page_profile()
-    elif nav == "Admin – Users":
+    elif choice == "Admin – Users":
         page_admin_users()
-
-if __name__ == "__main__":
-    main()
+    elif choice == "Logout":
+        st.session_state.clear()
+        st.rerun()
