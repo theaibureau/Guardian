@@ -297,32 +297,31 @@ def page_admin_users():
 def main():
     st.set_page_config(page_title=APP_NAME, page_icon="🛡️", layout="wide")
     init_db()
-    handle_confirm_param()
 
-    if 'user' not in st.session_state: st.session_state['user'] = None
-    def main():
-    st.set_page_config(page_title=APP_NAME, page_icon="🛡️", layout="wide")
-    init_db()
-    handle_confirm_param()
+    # 🚨 BYPASS LOGIN: Force a demo user into session
+    if 'user' not in st.session_state or st.session_state['user'] is None:
+        st.session_state['user'] = {
+            'id': 1,
+            'username': 'demo',
+            'full_name': 'Demo Inspector',
+            'role': 'inspector',
+        }
 
-    # 🚨 TEMPORARY BYPASS: Auto-login as a fake inspector user
-    st.session_state['user'] = {
-        'id': 1,
-        'username': 'demo',
-        'full_name': 'Demo Inspector',
-        'role': 'inspector',
-    }
+    # Sidebar nav
+    nav = sidebar_nav() or "Dashboard"
 
-    # Go straight to dashboard / inspections
-    choice = sidebar_nav() or "Dashboard"
-    if choice == "Dashboard":
+    if nav == "Dashboard":
         page_dashboard()
-    elif choice == "New Inspection":
+    elif nav == "New Inspection":
         page_new_inspection()
-    elif choice == "Profile & Branding":
+    elif nav == "Profile & Branding":
         page_profile()
-    elif choice == "Admin – Users":
+    elif nav == "Admin – Users":
         page_admin_users()
-    elif choice == "Logout":
+    elif nav == "Logout":
         st.session_state.clear()
         st.rerun()
+
+
+if __name__ == "__main__":
+    main()
